@@ -31,13 +31,6 @@ def rotate_180(image, mask):
     # rotate image and mask by 180 degrees
     return cv2.rotate(image, cv2.ROTATE_180), cv2.rotate(mask, cv2.ROTATE_180)
 
-def train_augmentation(image, mask, use_nlm=True, use_rotation=True):
-    if use_nlm:
-        image = nlm_denoise(image)
-    if use_rotation:
-        image, mask = rotate_180(image, mask)
-    return image, mask
-
 def is_image_file(filename): # collect image-mask pairs
     return filename.lower().endswith((".png", ".jpg", ".jpeg", ".bmp"))
 
@@ -113,16 +106,6 @@ def get_patient_pairs(root_dir):
                     })
     return records
 
-def split_patient_pairs(root_dir, test_ratio=0.2, seed=42):
-    # split to train & test set by patient, while keeping every class represented in both sets
-    records = get_patient_pairs(root_dir)
-    train_records, test_records = split_patient_records(records, test_ratio=test_ratio, seed=seed)
-    train_image_paths = [r["image_path"] for r in train_records]
-    train_mask_paths = [r["mask_paths"] for r in train_records]
-    test_image_paths = [r["image_path"] for r in test_records]
-    test_mask_paths = [r["mask_paths"] for r in test_records]
-    return train_image_paths, train_mask_paths, test_image_paths, test_mask_paths
-
 def split_patient_records(records, test_ratio=0.2, seed=42):
     # split records to train & test by patient, while keeping every class represented in both sets
     by_class = {}
@@ -148,50 +131,68 @@ def split_patient_records(records, test_ratio=0.2, seed=42):
                 train_records.extend(samples)
     return train_records, test_records
 
-def get_busi_pairs(root_dir):
-    records = get_patient_pairs(root_dir)
-    image_paths = [r["image_path"] for r in records]
-    mask_paths = [r["mask_paths"] for r in records]
-    return image_paths, mask_paths
 #load one image-mask pair at a time
 class BUSIDataset(Dataset):
-    def __init__(self, image_paths, mask_paths, image_transform=None, mask_transform=None, augmentation=None):
+    def __init__(self, image_paths, mask_paths, image_transform=None, mask_transform=None, augmentation=False):
         assert len(image_paths) == len(mask_paths)
-        self.image_paths = image_paths
-        self.mask_paths = mask_paths
         self.image_transform = image_transform
         self.mask_transform = mask_transform
         self.augmentation = augmentation
-    def __len__(self):
-        return len(self.image_paths)
-    def __getitem__(self, idx):
-        image = cv2.imread(self.image_paths[idx], cv2.IMREAD_GRAYSCALE)
-        image = image.astype("float32")
-        mask_files = self.mask_paths[idx]
-        if len(mask_files) == 0:
-            raise ValueError(f"no mask files found for image: {self.image_paths[idx]}")
-        mask = None
-        for mask_file in mask_files:
-            current_mask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
-            if current_mask is None:
-                continue
-            current_mask = (current_mask > 0).astype("float32")
+        self.samples = [] # save all the samples
+        self.prepare_dataset(image_paths, mask_paths)
+    def prepare_dataset(self, image_paths, mask_paths):
+        for image_path, mask_files in zip(image_paths, mask_paths):
+            # load image
+            image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            if image is None:
+                raise ValueError(f"couldn't read image: {image_path}")
+            image = image.astype("float32")
+            # load masks
+            if len(mask_files) == 0:
+                raise ValueError(f"no mask files found for image: {image_path}")
+            mask = None
+            for mask_file in mask_files:
+                current_mask = cv2.imread(mask_file, cv2.IMREAD_GRAYSCALE)
+                if current_mask is None:
+                    continue
+                current_mask = (current_mask > 0).astype("float32")
+                if mask is None:
+                    mask = current_mask
+                else:
+                    if current_mask.shape != mask.shape:
+                        current_mask = cv2.resize(current_mask, (mask.shape[1], mask.shape[0]), interpolation=cv2.INTER_NEAREST)
+                    mask = ((mask > 0) | (current_mask > 0)).astype("float32")
             if mask is None:
-                mask = current_mask
-            else:
-                if current_mask.shape != mask.shape:
-                    current_mask = cv2.resize(current_mask, (mask.shape[1], mask.shape[0]),
-                                              interpolation=cv2.INTER_NEAREST)
-                mask = ((mask > 0) | (current_mask > 0)).astype("float32")
-        if mask is None:
-            raise ValueError(f"couldn't read any mask files for image: {self.image_paths[idx]}")
-
-        if self.augmentation is not None:
-            image, mask = self.augmentation(image, mask)
-
-        if self.image_transform:
-            image = self.image_transform(image)
-        if self.mask_transform:
-            mask = self.mask_transform(mask)
-        mask = (mask > 0.5).float()
+                raise ValueError(f"couldn't read any mask for image: {image_path}")
+            img = image
+            msk = mask
+            if self.image_transform:
+                img = self.image_transform(img)
+            if self.mask_transform:
+                msk = self.mask_transform(msk)
+            msk = (msk > 0.5).float()
+            self.samples.append((img, msk))
+            # augmentations
+            if self.augmentation:
+                # NLM
+                img_nlm = nlm_denoise(image)
+                msk_nlm = mask
+                if self.image_transform:
+                    img_nlm = self.image_transform(img_nlm)
+                if self.mask_transform:
+                    msk_nlm = self.mask_transform(msk_nlm)
+                msk_nlm = (msk_nlm > 0.5).float()
+                self.samples.append((img_nlm, msk_nlm))
+                # rotation
+                img_rot, msk_rot = rotate_180(image, mask)
+                if self.image_transform:
+                    img_rot = self.image_transform(img_rot)
+                if self.mask_transform:
+                    msk_rot = self.mask_transform(msk_rot)
+                msk_rot = (msk_rot > 0.5).float()
+                self.samples.append((img_rot, msk_rot))
+    def __len__(self):
+        return len(self.samples)
+    def __getitem__(self, idx):
+        image, mask = self.samples[idx]
         return image, mask

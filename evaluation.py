@@ -17,7 +17,7 @@ def evaluate(model, val_loader, criterion, device):
     all_probs = []
     all_targets = []
     with torch.no_grad():
-        for images, masks in tqdm(val_loader, desc="eval batches", leave=False):
+        for batch_idx, (images, masks) in enumerate(tqdm(val_loader, desc="eval batches", leave=False)):
             images = images.to(device)
             masks = masks.to(device)
             outputs = model(images)
@@ -30,6 +30,7 @@ def evaluate(model, val_loader, criterion, device):
             acc_metric(preds, masks)
             all_probs.append(probs.cpu())
             all_targets.append(masks.cpu())
+            print(f"eval batch {batch_idx + 1}/{len(val_loader)} completed")
     val_loss = running_loss / len(val_loader)
     dice = dice_metric.aggregate().item()
     iou = iou_metric.compute().item()

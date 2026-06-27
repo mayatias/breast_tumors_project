@@ -2,7 +2,6 @@ import torch
 from monai.metrics import DiceMetric
 from sklearn.metrics import roc_auc_score
 from torchmetrics.classification import BinaryJaccardIndex, BinaryAccuracy
-from tqdm.auto import tqdm
 
 def init_metrics(device):
     dice_metric = DiceMetric(include_background=True, reduction="mean")
@@ -10,13 +9,13 @@ def init_metrics(device):
     acc_metric = BinaryAccuracy().to(device)
     return dice_metric, iou_metric, acc_metric
 
-def train_epoch(model, train_loader, optimizer, criterion, device):
+def train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch):
     model.train()
     running_loss = 0.0
     dice_metric, iou_metric, acc_metric = init_metrics(device)
     all_probs = []
     all_targets = []
-    for images, masks in tqdm(train_loader, desc="train batches", leave=False):
+    for batch_idx, (images, masks) in enumerate(train_loader):
         images = images.to(device) # move to GPU/CPU
         masks = masks.to(device)
         optimizer.zero_grad() # reset gradients
@@ -24,6 +23,8 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
         loss = criterion(outputs, masks) # compute loss
         loss.backward() # backward pass
         optimizer.step() # update weights
+        global_step = epoch * len(train_loader) + batch_idx
+        writer.add_scalar("loss/train", loss.item(), global_step)
         running_loss = running_loss + loss.item()
         probs = torch.sigmoid(outputs)
         preds = (probs > 0.5).float()
@@ -32,6 +33,7 @@ def train_epoch(model, train_loader, optimizer, criterion, device):
         acc_metric(preds, masks)
         all_probs.append(probs.detach().cpu())
         all_targets.append(masks.detach().cpu())
+        print(f"batch {batch_idx + 1}/{len(train_loader)} completed")
     train_loss = running_loss / len(train_loader)
     dice = dice_metric.aggregate().item()
     iou = iou_metric.compute().item()
