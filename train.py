@@ -9,7 +9,8 @@ def init_metrics(device):
     acc_metric = BinaryAccuracy().to(device)
     return dice_metric, iou_metric, acc_metric
 
-def train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch, scaler=None, use_amp=True):
+def train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch, scaler=None, use_amp=True,
+                max_grad_norm=1.0):
     model.train()
     running_loss = 0.0
     dice_metric, iou_metric, acc_metric = init_metrics(device)
@@ -24,14 +25,23 @@ def train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch
             outputs = model(images) # forward pass
         loss = criterion(outputs.float(), masks.float()) # compute loss in float32 for stability
         if not torch.isfinite(loss):
-            print(f"warning: non-finite loss at batch {batch_idx + 1}; skipping update")
-            continue
+            with torch.autocast(device_type=device.type, enabled=False):
+                outputs = model(images)
+                loss = criterion(outputs, masks)
+            if not torch.isfinite(loss):
+                print(f"warning: non-finite loss at batch {batch_idx + 1}; skipping update")
+                continue
         if amp_enabled and scaler is not None:
             scaler.scale(loss).backward() # backward pass
+            scaler.unscale_(optimizer)
+            if max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             scaler.step(optimizer)
             scaler.update()
         else:
             loss.backward()
+            if max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
             optimizer.step()
         global_step = epoch * len(train_loader) + batch_idx
         writer.add_scalar("loss/train", loss.item(), global_step)
