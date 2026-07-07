@@ -23,7 +23,7 @@ def evaluate(model, val_loader, criterion, device):
             masks = masks.to(device)
             with torch.autocast(device_type=device.type, enabled=amp_enabled):
                 outputs = model(images)
-                loss = criterion(outputs, masks)
+            loss = criterion(outputs.float(), masks.float())
             running_loss = running_loss + loss.item()
             probs = torch.sigmoid(outputs.float())
             preds = (probs > 0.5).float()

@@ -22,7 +22,10 @@ def train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch
         optimizer.zero_grad(set_to_none=True) # reset gradients
         with torch.autocast(device_type=device.type, enabled=amp_enabled):
             outputs = model(images) # forward pass
-            loss = criterion(outputs, masks) # compute loss
+        loss = criterion(outputs.float(), masks.float()) # compute loss in float32 for stability
+        if not torch.isfinite(loss):
+            print(f"warning: non-finite loss at batch {batch_idx + 1}; skipping update")
+            continue
         if amp_enabled and scaler is not None:
             scaler.scale(loss).backward() # backward pass
             scaler.step(optimizer)
