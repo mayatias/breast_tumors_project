@@ -14,21 +14,33 @@ from torch.utils.tensorboard import SummaryWriter
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-def save_loss_plot(output_path, train_losses, val_losses=None, title="Loss vs Epoch"):
-    epochs = range(1, len(train_losses) + 1)
+def save_history_plot(output_path, train_values, val_values=None, title="Metric vs Epoch", ylabel="Metric",
+                      train_label="Train", val_label="Validation"):
+    epochs = range(1, len(train_values) + 1)
     fig = plt.figure()
     fig.set_size_inches(8, 5)
-    plt.plot(epochs, train_losses, marker="o", label="Train loss")
-    if val_losses is not None:
-        plt.plot(epochs, val_losses, marker="o", label="Validation loss")
+    plt.plot(epochs, train_values, marker="o", label=train_label)
+    if val_values is not None:
+        plt.plot(epochs, val_values, marker="o", label=val_label)
     plt.title(title)
     plt.xlabel("Epoch")
-    plt.ylabel("Loss")
+    plt.ylabel(ylabel)
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
     plt.savefig(output_path, dpi=200)
     plt.close()
+
+def save_loss_plot(output_path, train_losses, val_losses=None, title="Loss vs Epoch"):
+    save_history_plot(
+        output_path=output_path,
+        train_values=train_losses,
+        val_values=val_losses,
+        title=title,
+        ylabel="Loss",
+        train_label="Train loss",
+        val_label="Validation loss",
+    )
 
 def average_histories(histories):
     if not histories:
@@ -68,6 +80,10 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
     best_acc = 0
     best_auc = 0
     train_losses = []
+    train_dices = []
+    train_ious = []
+    val_dices = []
+    val_ious = []
     val_losses = []
     epoch_bar = tqdm(range(epochs), desc=f"fold {fold + 1}/{n_splits}", leave=False)
     writer = SummaryWriter(log_dir=f"runs/fold_{fold + 1}")
@@ -84,6 +100,13 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
             use_amp=use_amp,
         )
         train_losses.append(train_loss)
+        train_dices.append(train_dice)
+        train_ious.append(train_iou)
+        writer.add_scalar("loss/train_epoch", train_loss, epoch)
+        writer.add_scalar("metrics/dice_train", train_dice, epoch)
+        writer.add_scalar("metrics/iou_train", train_iou, epoch)
+        writer.add_scalar("metrics/accuracy_train", train_acc, epoch)
+        writer.add_scalar("metrics/auc_train", train_auc, epoch)
         print(f"train epoch {epoch+1}/{epochs} | " f"train loss: {train_loss:.4f} | train dice: {train_dice:.4f} | " 
               f"train IoU: {train_iou:.4f} | train accuracy: {train_acc:.4f} | train AUC: {train_auc:.4f}")
         val_loss, val_dice, val_iou, val_acc, val_auc = evaluate(model, val_loader, criterion, device)
@@ -93,6 +116,8 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
         writer.add_scalar("metrics/accuracy_validation", val_acc, epoch)
         writer.add_scalar("metrics/auc_validation", val_auc, epoch)
         val_losses.append(val_loss)
+        val_dices.append(val_dice)
+        val_ious.append(val_iou)
         print(f"val epoch {epoch+1}/{epochs} | " f"val loss: {val_loss:.4f} | val dice: {val_dice:.4f} | " 
               f"val IoU: {val_iou:.4f} | val accuracy: {val_acc:.4f} | val AUC: {val_auc:.4f}")
         if val_dice > best_dice:
@@ -104,8 +129,26 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
         epoch_bar.set_postfix(train_loss=f"{train_loss:.4f}", val_dice=f"{val_dice:.4f}", best_dice=f"{best_dice:.4f}")
     plot_path = f"loss_curve_fold_{fold + 1}.png"
     save_loss_plot(plot_path, train_losses, val_losses, title=f"Fold {fold + 1} loss vs epoch")
+    save_history_plot(
+        f"dice_curve_fold_{fold + 1}.png",
+        train_dices,
+        val_dices,
+        title=f"Fold {fold + 1} Dice vs epoch",
+        ylabel="Dice",
+        train_label="Train Dice",
+        val_label="Validation Dice",
+    )
+    save_history_plot(
+        f"iou_curve_fold_{fold + 1}.png",
+        train_ious,
+        val_ious,
+        title=f"Fold {fold + 1} IoU vs epoch",
+        ylabel="IoU",
+        train_label="Train IoU",
+        val_label="Validation IoU",
+    )
     writer.close()
-    return best_dice, best_iou, best_acc, best_auc, train_losses, val_losses
+    return best_dice, best_iou, best_acc, best_auc, train_losses, val_losses, train_dices, val_dices, train_ious, val_ious
 
 def train_final_model(train_records, batch_size, epochs, lr, device):
     train_image_paths, train_mask_paths = records_to_paths(train_records)
@@ -119,6 +162,8 @@ def train_final_model(train_records, batch_size, epochs, lr, device):
     use_amp = device.type == "cuda"
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     train_losses = []
+    train_dices = []
+    train_ious = []
     epoch_bar = tqdm(range(epochs), desc="final train", leave=False)
     writer = SummaryWriter(log_dir="runs/final_model")
     for epoch in epoch_bar:
@@ -134,13 +179,34 @@ def train_final_model(train_records, batch_size, epochs, lr, device):
             use_amp=use_amp,
         )
         train_losses.append(train_loss)
+        train_dices.append(train_dice)
+        train_ious.append(train_iou)
+        writer.add_scalar("loss/train_epoch", train_loss, epoch)
+        writer.add_scalar("metrics/dice_train", train_dice, epoch)
+        writer.add_scalar("metrics/iou_train", train_iou, epoch)
+        writer.add_scalar("metrics/accuracy_train", train_acc, epoch)
+        writer.add_scalar("metrics/auc_train", train_auc, epoch)
         print(f"final train epoch {epoch+1}/{epochs} | " f"train loss: {train_loss:.4f} | train dice: {train_dice:.4f} | "
               f"train IoU: {train_iou:.4f} | train accuracy: {train_acc:.4f} | train AUC: {train_auc:.4f}")
         epoch_bar.set_postfix(train_loss=f"{train_loss:.4f}", train_dice=f"{train_dice:.4f}")
     torch.save(model.state_dict(), "final_model.pth")
     save_loss_plot("final_train_loss_curve.png", train_losses, title="Final training loss vs epoch")
+    save_history_plot(
+        "final_train_dice_curve.png",
+        train_dices,
+        title="Final training Dice vs epoch",
+        ylabel="Dice",
+        train_label="Train Dice",
+    )
+    save_history_plot(
+        "final_train_iou_curve.png",
+        train_ious,
+        title="Final training IoU vs epoch",
+        ylabel="IoU",
+        train_label="Train IoU",
+    )
     writer.close()
-    return "final_model.pth", train_losses
+    return "final_model.pth", train_losses, train_dices, train_ious
 
 def evaluate_model_on_test(model_path, test_loader, device):
     model = CResUNet().to(device)
@@ -176,10 +242,14 @@ def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed,
     auc_scores = []
     fold_train_histories = []
     fold_val_histories = []
+    fold_train_dice_histories = []
+    fold_val_dice_histories = []
+    fold_train_iou_histories = []
+    fold_val_iou_histories = []
     fold_bar = tqdm(range(n_splits), desc="cross-val folds", leave=True)
     for fold in fold_bar:
         print(f"\nfold {fold + 1}\n")
-        best_dice, best_iou, best_acc, best_auc, train_losses, val_losses = run_fold(
+        best_dice, best_iou, best_acc, best_auc, train_losses, val_losses, train_dices, val_dices, train_ious, val_ious = run_fold(
             fold=fold,
             fold_records=fold_records,
             n_splits=n_splits,
@@ -194,6 +264,10 @@ def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed,
         auc_scores.append(best_auc)
         fold_train_histories.append(train_losses)
         fold_val_histories.append(val_losses)
+        fold_train_dice_histories.append(train_dices)
+        fold_val_dice_histories.append(val_dices)
+        fold_train_iou_histories.append(train_ious)
+        fold_val_iou_histories.append(val_ious)
         print(f"\nbest dice for fold {fold+1}: {best_dice:.4f}")
         fold_bar.set_postfix(best_dice=f"{best_dice:.4f}")
     print("\nfinal results:")
@@ -207,7 +281,19 @@ def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed,
     if avg_train_losses and avg_val_losses:
         save_loss_plot("cross_validation_loss_curve.png", avg_train_losses, avg_val_losses,
                        title="Average cross-validation loss vs epoch")
+    avg_train_dices = average_histories(fold_train_dice_histories)
+    avg_val_dices = average_histories(fold_val_dice_histories)
+    if avg_train_dices and avg_val_dices:
+        save_history_plot("cross_validation_dice_curve.png", avg_train_dices, avg_val_dices,
+                          title="Average cross-validation Dice vs epoch", ylabel="Dice",
+                          train_label="Train Dice", val_label="Validation Dice")
+    avg_train_ious = average_histories(fold_train_iou_histories)
+    avg_val_ious = average_histories(fold_val_iou_histories)
+    if avg_train_ious and avg_val_ious:
+        save_history_plot("cross_validation_iou_curve.png", avg_train_ious, avg_val_ious,
+                          title="Average cross-validation IoU vs epoch", ylabel="IoU",
+                          train_label="Train IoU", val_label="Validation IoU")
 
-    final_model_path, _ = train_final_model(train_records=train_records, batch_size=batch_size,
-                                           epochs=epochs, lr=lr, device=device)
+    final_model_path, _, _, _ = train_final_model(train_records=train_records, batch_size=batch_size,
+                                                  epochs=epochs, lr=lr, device=device)
     evaluate_model_on_test(final_model_path, test_loader, device)
