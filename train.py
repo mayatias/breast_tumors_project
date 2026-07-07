@@ -9,24 +9,31 @@ def init_metrics(device):
     acc_metric = BinaryAccuracy().to(device)
     return dice_metric, iou_metric, acc_metric
 
-def train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch):
+def train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch, scaler=None, use_amp=True):
     model.train()
     running_loss = 0.0
     dice_metric, iou_metric, acc_metric = init_metrics(device)
     all_probs = []
     all_targets = []
+    amp_enabled = use_amp and device.type == "cuda"
     for batch_idx, (images, masks) in enumerate(train_loader):
         images = images.to(device) # move to GPU/CPU
         masks = masks.to(device)
-        optimizer.zero_grad() # reset gradients
-        outputs = model(images) # forward pass
-        loss = criterion(outputs, masks) # compute loss
-        loss.backward() # backward pass
-        optimizer.step() # update weights
+        optimizer.zero_grad(set_to_none=True) # reset gradients
+        with torch.autocast(device_type=device.type, enabled=amp_enabled):
+            outputs = model(images) # forward pass
+            loss = criterion(outputs, masks) # compute loss
+        if amp_enabled and scaler is not None:
+            scaler.scale(loss).backward() # backward pass
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
         global_step = epoch * len(train_loader) + batch_idx
         writer.add_scalar("loss/train", loss.item(), global_step)
         running_loss = running_loss + loss.item()
-        probs = torch.sigmoid(outputs)
+        probs = torch.sigmoid(outputs.float())
         preds = (probs > 0.5).float()
         dice_metric(y_pred=preds, y=masks)
         iou_metric(preds, masks)

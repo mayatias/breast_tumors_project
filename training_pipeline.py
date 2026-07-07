@@ -61,6 +61,8 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
     model = CResUNet().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = DiceLoss(sigmoid=True)
+    use_amp = device.type == "cuda"
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     best_dice = 0
     best_iou = 0
     best_acc = 0
@@ -70,7 +72,17 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
     epoch_bar = tqdm(range(epochs), desc=f"fold {fold + 1}/{n_splits}", leave=False)
     writer = SummaryWriter(log_dir=f"runs/fold_{fold + 1}")
     for epoch in epoch_bar:
-        train_loss, train_dice, train_iou, train_acc, train_auc = train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch)
+        train_loss, train_dice, train_iou, train_acc, train_auc = train_epoch(
+            model,
+            train_loader,
+            optimizer,
+            criterion,
+            device,
+            writer,
+            epoch,
+            scaler=scaler,
+            use_amp=use_amp,
+        )
         train_losses.append(train_loss)
         print(f"train epoch {epoch+1}/{epochs} | " f"train loss: {train_loss:.4f} | train dice: {train_dice:.4f} | " 
               f"train IoU: {train_iou:.4f} | train accuracy: {train_acc:.4f} | train AUC: {train_auc:.4f}")
@@ -104,11 +116,23 @@ def train_final_model(train_records, batch_size, epochs, lr, device):
     model = CResUNet().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = DiceLoss(sigmoid=True)
+    use_amp = device.type == "cuda"
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     train_losses = []
     epoch_bar = tqdm(range(epochs), desc="final train", leave=False)
     writer = SummaryWriter(log_dir="runs/final_model")
     for epoch in epoch_bar:
-        train_loss, train_dice, train_iou, train_acc, train_auc = train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch)
+        train_loss, train_dice, train_iou, train_acc, train_auc = train_epoch(
+            model,
+            train_loader,
+            optimizer,
+            criterion,
+            device,
+            writer,
+            epoch,
+            scaler=scaler,
+            use_amp=use_amp,
+        )
         train_losses.append(train_loss)
         print(f"final train epoch {epoch+1}/{epochs} | " f"train loss: {train_loss:.4f} | train dice: {train_dice:.4f} | "
               f"train IoU: {train_iou:.4f} | train accuracy: {train_acc:.4f} | train AUC: {train_auc:.4f}")

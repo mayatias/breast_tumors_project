@@ -195,4 +195,5 @@ class BUSIDataset(Dataset):
         return len(self.samples)
     def __getitem__(self, idx):
         image, mask = self.samples[idx]
+
         return image, mask
