@@ -16,16 +16,14 @@ def evaluate(model, val_loader, criterion, device):
     running_loss = 0.0
     all_probs = []
     all_targets = []
-    amp_enabled = device.type == "cuda"
     with torch.no_grad():
         for batch_idx, (images, masks) in enumerate(tqdm(val_loader, desc="eval batches", leave=False)):
             images = images.to(device)
             masks = masks.to(device)
-            with torch.autocast(device_type=device.type, enabled=amp_enabled):
-                outputs = model(images)
-            loss = criterion(outputs.float(), masks.float())
+            outputs = model(images)
+            loss = criterion(outputs, masks)
             running_loss = running_loss + loss.item()
-            probs = torch.sigmoid(outputs.float())
+            probs = torch.sigmoid(outputs)
             preds = (probs > 0.5).float()
             dice_metric(y_pred=preds, y=masks)
             iou_metric(preds, masks)

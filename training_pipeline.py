@@ -73,8 +73,6 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
     model = CResUNet().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = DiceLoss(sigmoid=True)
-    use_amp = device.type == "cuda"
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     best_dice = 0
     best_iou = 0
     best_acc = 0
@@ -96,8 +94,6 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
             device,
             writer,
             epoch,
-            scaler=scaler,
-            use_amp=use_amp,
         )
         train_losses.append(train_loss)
         train_dices.append(train_dice)
@@ -159,8 +155,6 @@ def train_final_model(train_records, batch_size, epochs, lr, device):
     model = CResUNet().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = DiceLoss(sigmoid=True)
-    use_amp = device.type == "cuda"
-    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
     train_losses = []
     train_dices = []
     train_ious = []
@@ -175,8 +169,6 @@ def train_final_model(train_records, batch_size, epochs, lr, device):
             device,
             writer,
             epoch,
-            scaler=scaler,
-            use_amp=use_amp,
         )
         train_losses.append(train_loss)
         train_dices.append(train_dice)

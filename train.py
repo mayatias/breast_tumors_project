@@ -9,40 +9,25 @@ def init_metrics(device):
     acc_metric = BinaryAccuracy().to(device)
     return dice_metric, iou_metric, acc_metric
 
-def train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch, scaler=None, use_amp=True,
-                max_grad_norm=1.0):
+def train_epoch(model, train_loader, optimizer, criterion, device, writer, epoch, max_grad_norm=1.0):
     model.train()
     running_loss = 0.0
     dice_metric, iou_metric, acc_metric = init_metrics(device)
     all_probs = []
     all_targets = []
-    amp_enabled = use_amp and device.type == "cuda"
     for batch_idx, (images, masks) in enumerate(train_loader):
         images = images.to(device) # move to GPU/CPU
         masks = masks.to(device)
         optimizer.zero_grad(set_to_none=True) # reset gradients
-        with torch.autocast(device_type=device.type, enabled=amp_enabled):
-            outputs = model(images) # forward pass
-        loss = criterion(outputs.float(), masks.float()) # compute loss in float32 for stability
+        outputs = model(images) # forward pass
+        loss = criterion(outputs, masks) # compute loss
         if not torch.isfinite(loss):
-            with torch.autocast(device_type=device.type, enabled=False):
-                outputs = model(images)
-                loss = criterion(outputs, masks)
-            if not torch.isfinite(loss):
-                print(f"warning: non-finite loss at batch {batch_idx + 1}; skipping update")
-                continue
-        if amp_enabled and scaler is not None:
-            scaler.scale(loss).backward() # backward pass
-            scaler.unscale_(optimizer)
-            if max_grad_norm is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            loss.backward()
-            if max_grad_norm is not None:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
-            optimizer.step()
+            print(f"warning: non-finite loss at batch {batch_idx + 1}; skipping update")
+            continue
+        loss.backward() # backward pass
+        if max_grad_norm is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+        optimizer.step() # update weights
         global_step = epoch * len(train_loader) + batch_idx
         writer.add_scalar("loss/train", loss.item(), global_step)
         running_loss = running_loss + loss.item()
