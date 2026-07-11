@@ -2,9 +2,10 @@ import torch
 from training_pipeline import run_experiment
 from model import CResUNet
 
-lr = 1e-4
+lr = 5e-5
 epochs = 20
-batch_size = 16
+num_workers = 2
+batch_size = 8
 n_splits = 1
 root_dir = "BUSI_Dataset"
 test_ratio = 0.2
@@ -21,7 +22,7 @@ def main():
     print("device:", device)
     print_model_parameter_count()
     run_experiment(root_dir=root_dir, n_splits=n_splits, batch_size=batch_size, epochs=epochs,
-                   lr=lr, test_ratio=test_ratio, seed=seed, device=device)
+                   lr=lr, test_ratio=test_ratio, seed=seed, device=device, num_workers=num_workers)
 
 if __name__ == "__main__":
     main()

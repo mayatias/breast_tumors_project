@@ -32,15 +32,8 @@ def save_history_plot(output_path, train_values, val_values=None, title="Metric 
     plt.close()
 
 def save_loss_plot(output_path, train_losses, val_losses=None, title="Loss vs Epoch"):
-    save_history_plot(
-        output_path=output_path,
-        train_values=train_losses,
-        val_values=val_losses,
-        title=title,
-        ylabel="Loss",
-        train_label="Train loss",
-        val_label="Validation loss",
-    )
+    save_history_plot(output_path=output_path, train_values=train_losses, val_values=val_losses, title=title, ylabel="loss",
+                      train_label="train loss", val_label="validation loss")
 
 def average_histories(histories):
     if not histories:
@@ -52,7 +45,7 @@ def average_histories(histories):
         averaged.append(sum(epoch_values) / len(epoch_values))
     return averaged
 
-def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
+def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device, num_workers):
     if n_splits == 1:
         train_fold_records, val_records = fold_records[0]
     else:
@@ -68,8 +61,8 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
     val_dataset = BUSIDataset(fold_val_image_paths, fold_val_mask_paths, image_transform=img_transform(),
                               mask_transform=mask_transform(), augmentation=False)
     print(f"fold {fold + 1} training dataset size (after augmentation): {len(train_dataset)}")
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     model = CResUNet().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = DiceLoss(sigmoid=True)
@@ -86,15 +79,8 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
     epoch_bar = tqdm(range(epochs), desc=f"fold {fold + 1}/{n_splits}", leave=False)
     writer = SummaryWriter(log_dir=f"runs/fold_{fold + 1}")
     for epoch in epoch_bar:
-        train_loss, train_dice, train_iou, train_acc, train_auc = train_epoch(
-            model,
-            train_loader,
-            optimizer,
-            criterion,
-            device,
-            writer,
-            epoch,
-        )
+        train_loss, train_dice, train_iou, train_acc, train_auc = train_epoch(model, train_loader, optimizer, criterion,
+                                                                              device, writer, epoch)
         train_losses.append(train_loss)
         train_dices.append(train_dice)
         train_ious.append(train_iou)
@@ -125,33 +111,19 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device):
         epoch_bar.set_postfix(train_loss=f"{train_loss:.4f}", val_dice=f"{val_dice:.4f}", best_dice=f"{best_dice:.4f}")
     plot_path = f"loss_curve_fold_{fold + 1}.png"
     save_loss_plot(plot_path, train_losses, val_losses, title=f"Fold {fold + 1} loss vs epoch")
-    save_history_plot(
-        f"dice_curve_fold_{fold + 1}.png",
-        train_dices,
-        val_dices,
-        title=f"Fold {fold + 1} Dice vs epoch",
-        ylabel="Dice",
-        train_label="Train Dice",
-        val_label="Validation Dice",
-    )
-    save_history_plot(
-        f"iou_curve_fold_{fold + 1}.png",
-        train_ious,
-        val_ious,
-        title=f"Fold {fold + 1} IoU vs epoch",
-        ylabel="IoU",
-        train_label="Train IoU",
-        val_label="Validation IoU",
-    )
+    save_history_plot(f"dice_curve_fold_{fold + 1}.png", train_dices, val_dices, title=f"fold {fold + 1} dice vs epoch",
+                      ylabel="dice", train_label="train dice", val_label="validation dice")
+    save_history_plot(f"iou_curve_fold_{fold + 1}.png", train_ious, val_ious, title=f"fold {fold + 1} IoU vs epoch",
+                      ylabel="IoU", train_label="train IoU", val_label="validation IoU")
     writer.close()
     return best_dice, best_iou, best_acc, best_auc, train_losses, val_losses, train_dices, val_dices, train_ious, val_ious
 
-def train_final_model(train_records, batch_size, epochs, lr, device):
+def train_final_model(train_records, batch_size, epochs, lr, device, num_workers):
     train_image_paths, train_mask_paths = records_to_paths(train_records)
     train_dataset = BUSIDataset(train_image_paths, train_mask_paths, image_transform=img_transform(),
                                 mask_transform=mask_transform(), augmentation=True)
     print(f"final training dataset size (after augmentation): {len(train_dataset)}")
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     model = CResUNet().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = DiceLoss(sigmoid=True)
@@ -161,15 +133,8 @@ def train_final_model(train_records, batch_size, epochs, lr, device):
     epoch_bar = tqdm(range(epochs), desc="final train", leave=False)
     writer = SummaryWriter(log_dir="runs/final_model")
     for epoch in epoch_bar:
-        train_loss, train_dice, train_iou, train_acc, train_auc = train_epoch(
-            model,
-            train_loader,
-            optimizer,
-            criterion,
-            device,
-            writer,
-            epoch,
-        )
+        train_loss, train_dice, train_iou, train_acc, train_auc = train_epoch(model, train_loader, optimizer, criterion,
+                                                                              device, writer, epoch)
         train_losses.append(train_loss)
         train_dices.append(train_dice)
         train_ious.append(train_iou)
@@ -182,21 +147,11 @@ def train_final_model(train_records, batch_size, epochs, lr, device):
               f"train IoU: {train_iou:.4f} | train accuracy: {train_acc:.4f} | train AUC: {train_auc:.4f}")
         epoch_bar.set_postfix(train_loss=f"{train_loss:.4f}", train_dice=f"{train_dice:.4f}")
     torch.save(model.state_dict(), "final_model.pth")
-    save_loss_plot("final_train_loss_curve.png", train_losses, title="Final training loss vs epoch")
-    save_history_plot(
-        "final_train_dice_curve.png",
-        train_dices,
-        title="Final training Dice vs epoch",
-        ylabel="Dice",
-        train_label="Train Dice",
-    )
-    save_history_plot(
-        "final_train_iou_curve.png",
-        train_ious,
-        title="Final training IoU vs epoch",
-        ylabel="IoU",
-        train_label="Train IoU",
-    )
+    save_loss_plot("final_train_loss_curve.png", train_losses, title="final training loss vs epoch")
+    save_history_plot("final_train_dice_curve.png", train_dices, title="final training dice vs epoch",
+                      ylabel="dice", train_label="train dice")
+    save_history_plot("final_train_iou_curve.png", train_ious, title="final training IoU vs epoch",
+                      ylabel="IoU", train_label="train IoU")
     writer.close()
     return "final_model.pth", train_losses, train_dices, train_ious
 
@@ -206,14 +161,13 @@ def evaluate_model_on_test(model_path, test_loader, device):
     criterion = DiceLoss(sigmoid=True)
     test_loss, test_dice, test_iou, test_acc, test_auc = evaluate(model, test_loader, criterion, device)
     print("\n test-set results:")
-    print(f"test loss: {test_loss:.4f}")
     print(f"test dice: {test_dice:.4f}")
     print(f"test IoU: {test_iou:.4f}")
     print(f"test accuracy: {test_acc:.4f}")
     print(f"test AUC: {test_auc:.4f}")
     return test_loss, test_dice, test_iou, test_acc, test_auc
 
-def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed, device):
+def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed, device, num_workers):
     all_records = get_patient_pairs(root_dir)
     train_records, test_records = split_patient_records(all_records, test_ratio=test_ratio, seed=seed)
     if n_splits == 1:
@@ -227,7 +181,7 @@ def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed,
     print(f"test samples:  {len(test_image_paths)}")
     test_dataset = BUSIDataset(test_image_paths, test_mask_paths, image_transform=img_transform(),
                                mask_transform=mask_transform(), augmentation=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     dice_scores = []
     iou_scores = []
     acc_scores = []
@@ -241,15 +195,11 @@ def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed,
     fold_bar = tqdm(range(n_splits), desc="cross-val folds", leave=True)
     for fold in fold_bar:
         print(f"\nfold {fold + 1}\n")
-        best_dice, best_iou, best_acc, best_auc, train_losses, val_losses, train_dices, val_dices, train_ious, val_ious = run_fold(
-            fold=fold,
-            fold_records=fold_records,
-            n_splits=n_splits,
-            batch_size=batch_size,
-            epochs=epochs,
-            lr=lr,
-            device=device,
-        )
+        (best_dice, best_iou, best_acc, best_auc, train_losses,
+         val_losses, train_dices, val_dices, train_ious, val_ious) = run_fold(fold=fold, fold_records=fold_records,
+                                                                              n_splits=n_splits, batch_size=batch_size,
+                                                                              epochs=epochs, lr=lr, device=device,
+                                                                              num_workers=num_workers)
         dice_scores.append(best_dice)
         iou_scores.append(best_iou)
         acc_scores.append(best_acc)
@@ -272,20 +222,20 @@ def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed,
     avg_val_losses = average_histories(fold_val_histories)
     if avg_train_losses and avg_val_losses:
         save_loss_plot("cross_validation_loss_curve.png", avg_train_losses, avg_val_losses,
-                       title="Average cross-validation loss vs epoch")
+                       title="average cross-validation loss vs epoch")
     avg_train_dices = average_histories(fold_train_dice_histories)
     avg_val_dices = average_histories(fold_val_dice_histories)
     if avg_train_dices and avg_val_dices:
         save_history_plot("cross_validation_dice_curve.png", avg_train_dices, avg_val_dices,
-                          title="Average cross-validation Dice vs epoch", ylabel="Dice",
-                          train_label="Train Dice", val_label="Validation Dice")
+                          title="average cross-validation dice vs epoch", ylabel="dice",
+                          train_label="train dice", val_label="validation dice")
     avg_train_ious = average_histories(fold_train_iou_histories)
     avg_val_ious = average_histories(fold_val_iou_histories)
     if avg_train_ious and avg_val_ious:
         save_history_plot("cross_validation_iou_curve.png", avg_train_ious, avg_val_ious,
-                          title="Average cross-validation IoU vs epoch", ylabel="IoU",
-                          train_label="Train IoU", val_label="Validation IoU")
+                          title="average cross-validation IoU vs epoch", ylabel="IoU",
+                          train_label="train IoU", val_label="validation IoU")
 
     final_model_path, _, _, _ = train_final_model(train_records=train_records, batch_size=batch_size,
-                                                  epochs=epochs, lr=lr, device=device)
+                                                  epochs=epochs, lr=lr, device=device, num_workers=num_workers)
     evaluate_model_on_test(final_model_path, test_loader, device)
