@@ -3,7 +3,6 @@ from monai.metrics import DiceMetric
 from sklearn.metrics import roc_auc_score
 from torchmetrics.classification import BinaryJaccardIndex, BinaryAccuracy
 from tqdm.auto import tqdm
-from model import CResUNet
 from monai.losses import DiceLoss
 
 def init_metrics(device):
@@ -56,8 +55,8 @@ def test_evaluate(model, val_loader, criterion, device):
     acc_metric.reset()
     return val_loss, dice, iou, acc, auc, results
 
-def evaluate_model_on_test(model_path, test_loader, device):
-    model = CResUNet().to(device)
+def evaluate_model_on_test(model, model_path, test_loader, device):
+    model = model.to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     criterion = DiceLoss(sigmoid=True)
     test_loss, test_dice, test_iou, test_acc, test_auc, results = test_evaluate(model, test_loader, criterion, device)

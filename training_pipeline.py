@@ -45,7 +45,7 @@ def average_histories(histories):
         averaged.append(sum(epoch_values) / len(epoch_values))
     return averaged
 
-def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device, num_workers):
+def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device, num_workers, model_class):
     if n_splits == 1:
         train_fold_records, val_records = fold_records[0]
     else:
@@ -63,7 +63,7 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device, num_w
     print(f"fold {fold + 1} training dataset size (after augmentation): {len(train_dataset)}")
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
-    model = CResUNet().to(device)
+    model = model_class().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = DiceLoss(sigmoid=True)
     best_dice = 0
@@ -118,13 +118,13 @@ def run_fold(fold, fold_records, n_splits, batch_size, epochs, lr, device, num_w
     writer.close()
     return best_dice, best_iou, best_acc, best_auc, train_losses, val_losses, train_dices, val_dices, train_ious, val_ious
 
-def train_final_model(train_records, batch_size, epochs, lr, device, num_workers):
+def train_final_model(train_records, batch_size, epochs, lr, device, num_workers, model_class):
     train_image_paths, train_mask_paths = records_to_paths(train_records)
     train_dataset = BUSIDataset(train_image_paths, train_mask_paths, image_transform=img_transform(),
                                 mask_transform=mask_transform(), augmentation=True)
     print(f"final training dataset size (after augmentation): {len(train_dataset)}")
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
-    model = CResUNet().to(device)
+    model = model_class().to(device)
     optimizer = optim.Adam(model.parameters(), lr=lr)
     criterion = DiceLoss(sigmoid=True)
     train_losses = []
@@ -155,8 +155,8 @@ def train_final_model(train_records, batch_size, epochs, lr, device, num_workers
     writer.close()
     return "final_model.pth", train_losses, train_dices, train_ious
 
-def evaluate_model_on_test(model_path, test_loader, device):
-    model = CResUNet().to(device)
+def evaluate_model_on_test(model_path, test_loader, device, model_class):
+    model = model_class().to(device)
     model.load_state_dict(torch.load(model_path, map_location=device))
     criterion = DiceLoss(sigmoid=True)
     test_loss, test_dice, test_iou, test_acc, test_auc = evaluate(model, test_loader, criterion, device)
@@ -167,7 +167,7 @@ def evaluate_model_on_test(model_path, test_loader, device):
     print(f"test AUC: {test_auc:.4f}")
     return test_loss, test_dice, test_iou, test_acc, test_auc
 
-def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed, device, num_workers):
+def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed, device, num_workers, model_class):
     all_records = get_patient_pairs(root_dir)
     train_records, test_records = split_patient_records(all_records, test_ratio=test_ratio, seed=seed)
     if n_splits == 1:
@@ -199,7 +199,7 @@ def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed,
          val_losses, train_dices, val_dices, train_ious, val_ious) = run_fold(fold=fold, fold_records=fold_records,
                                                                               n_splits=n_splits, batch_size=batch_size,
                                                                               epochs=epochs, lr=lr, device=device,
-                                                                              num_workers=num_workers)
+                                                                              num_workers=num_workers, model_class=model_class)
         dice_scores.append(best_dice)
         iou_scores.append(best_iou)
         acc_scores.append(best_acc)
@@ -237,5 +237,5 @@ def run_experiment(root_dir, n_splits, batch_size, epochs, lr, test_ratio, seed,
                           train_label="train IoU", val_label="validation IoU")
 
     final_model_path, _, _, _ = train_final_model(train_records=train_records, batch_size=batch_size,
-                                                  epochs=epochs, lr=lr, device=device, num_workers=num_workers)
-    evaluate_model_on_test(final_model_path, test_loader, device)
+                                                  epochs=epochs, lr=lr, device=device, num_workers=num_workers, model_class=model_class)
+    evaluate_model_on_test(final_model_path, test_loader, device, model_class=model_class)
