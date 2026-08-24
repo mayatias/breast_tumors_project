@@ -52,10 +52,11 @@ def get_patient_pairs(root_dir):
     expected structure:
         root_dir/
             benign/
-                patient1/
-                    patient1.png
-                    mask_patient1.png
-                    ...
+                patient1.png
+                patient1_mask.png
+                patient2.png
+                patient2_mask.png
+                ...
             malignant/
             normal/
 
